@@ -1,0 +1,162 @@
+//* This file is part of the MOOSE framework
+//* https://www.mooseframework.org
+//*
+//* All rights reserved, see COPYRIGHT for full restrictions
+//* https://github.com/idaholab/moose/blob/master/COPYRIGHT
+//*
+//* Licensed under LGPL 2.1, please see LICENSE for details
+//* https://www.gnu.org/licenses/lgpl-2.1.html
+//*
+//* This code modifies the KKSPhaseConcentration in MOOSE
+//* by including the hand coded interpolation function
+//* instead of using the Material property- S.Chatterjee
+
+#include "TCPhaseConstraintMuB.h"
+
+registerMooseObject("gibbsApp", TCPhaseConstraintMuB);
+
+template <>
+InputParameters
+validParams<TCPhaseConstraintMuB>()
+{
+  InputParameters params = validParams<MultiPhaseBase>();
+  params.addClassDescription("Eqn: (1-h(eta))*xB_alpha + h(eta)*xB_beta - xB = 0."
+                             "non-linear variable of this kernel is muC");
+  params.addRequiredCoupledVar("xB", "Overall component B mole fraction");
+  params.addParam<MaterialPropertyName>("xB_gamma", 0.0, "Mole fraction of B in gamma phase");
+  params.addParam<MaterialPropertyName>("xB_delta", 0.0, "Mole fraction of B in delta phase");
+  params.addParam<MaterialPropertyName>("xB_epsilon", 0.0, "Mole fraction of B in epsilon phase");
+  //B thermodynamic factor
+  params.addParam<MaterialPropertyName>("inv_B_tf_gamma",  0.0, "Thermodynamic factor B in gamma phase");
+  params.addParam<MaterialPropertyName>("inv_B_tf_delta",  0.0, "Thermodynamic factor B in delta phase");
+  params.addParam<MaterialPropertyName>("inv_B_tf_epsilon",0.0, "Thermodynamic factor B in epsilon phase");
+  //BC thermodynamic factor
+  params.addParam<MaterialPropertyName>("inv_BC_tf_gamma", 0.0, "Thermodynamic factor BC in gamma phase");
+  params.addParam<MaterialPropertyName>("inv_BC_tf_delta", 0.0, "Thermodynamic factor BC in delta phase");
+  params.addParam<MaterialPropertyName>("inv_BC_tf_epsilon", 0.0, "Thermodynamic factor BC in epsilon phase");
+  //Coupled variable
+  params.addRequiredCoupledVar("C_diff_pot", "Component C diffusion potential");
+  return params;
+}
+
+TCPhaseConstraintMuB::TCPhaseConstraintMuB(const InputParameters & parameters)
+  :  MultiPhaseBase(parameters),
+    _xB(coupledValue("xB")),
+    _xB_var(coupled("xB")),
+    //Material property: Mole fraction 
+    _xB_alpha(getMaterialProperty<Real>("xB_alpha")),
+    _xB_beta(getMaterialProperty<Real>("xB_beta")),
+    _xB_gamma(getMaterialProperty<Real>("xB_gamma")),
+    _xB_delta(getMaterialProperty<Real>("xB_delta")),
+    _xB_epsilon(getMaterialProperty<Real>("xB_epsilon")),
+    //coeff B of the susceptibility matrix
+    _inv_B_tf_alpha(getMaterialProperty<Real>("inv_B_tf_alpha")),
+    _inv_B_tf_beta(getMaterialProperty<Real>("inv_B_tf_beta")),
+    _inv_B_tf_gamma(getMaterialProperty<Real>("inv_B_tf_gamma")),
+    _inv_B_tf_delta(getMaterialProperty<Real>("inv_B_tf_delta")),
+    _inv_B_tf_epsilon(getMaterialProperty<Real>("inv_B_tf_epsilon")),
+    //coeff BC of the susceptibility matrix
+    _inv_BC_tf_alpha(getMaterialProperty<Real>("inv_BC_tf_alpha")),
+    _inv_BC_tf_beta(getMaterialProperty<Real>("inv_BC_tf_beta")),
+    _inv_BC_tf_gamma(getMaterialProperty<Real>("inv_BC_tf_gamma")),
+    _inv_BC_tf_delta(getMaterialProperty<Real>("inv_BC_tf_delta")),
+    _inv_BC_tf_epsilon(getMaterialProperty<Real>("inv_BC_tf_epsilon")),
+    //For a ternary alloy A-B-C
+    _C_diff_pot(coupledValue("C_diff_pot")),
+    _C_diff_pot_var(coupled("C_diff_pot"))
+    //For a quaternary alloy A-B-C-D
+    //_D_diff_pot(coupledValue("D_diff_pot")),
+    //_D_diff_pot_var(coupled("D_diff_pot"))
+{
+}
+
+Real
+TCPhaseConstraintMuB::chi_BB() const
+{
+   return (_h_alpha[_qp]  * _inv_B_tf_alpha[_qp] 
+         + _h_beta[_qp]   * _inv_B_tf_beta[_qp]
+         + _h_gamma[_qp]  * _inv_B_tf_gamma[_qp]
+         + _h_delta[_qp]  * _inv_B_tf_delta[_qp]
+         + _h_epsilon[_qp]* _inv_B_tf_epsilon[_qp]);
+ 
+}
+
+Real
+TCPhaseConstraintMuB::chi_BC() const
+{
+   return (_h_alpha[_qp]  * _inv_BC_tf_alpha[_qp] 
+         + _h_beta[_qp]   * _inv_BC_tf_beta[_qp]
+         + _h_gamma[_qp]  * _inv_BC_tf_gamma[_qp]
+         + _h_delta[_qp]  * _inv_BC_tf_delta[_qp]
+         + _h_epsilon[_qp]* _inv_BC_tf_epsilon[_qp]);
+ 
+}
+
+Real
+TCPhaseConstraintMuB::computeQpResidual()
+{
+   const Real _weighted_sum = (_xB_alpha[_qp] * _h_alpha[_qp] 
+                            + _xB_beta[_qp]   * _h_beta[_qp] 
+                            + _xB_gamma[_qp]  * _h_gamma[_qp]
+                            + _xB_delta[_qp]  * _h_delta[_qp]
+                            + _xB_epsilon[_qp]* _h_epsilon[_qp]);
+                          
+  // The kernel operates on the variable: Diffusion potential of comp B  
+   return (_test[_i][_qp] * (_weighted_sum - _xB[_qp]));
+}
+
+Real
+TCPhaseConstraintMuB::computeQpJacobian()
+{
+  return (_test[_i][_qp] * TCPhaseConstraintMuB::chi_BB() *_phi[_j][_qp]);
+}
+
+Real
+TCPhaseConstraintMuB::computeQpOffDiagJacobian(unsigned int jvar)
+{
+  if (jvar == _phase_alpha_var)
+  {
+    return (_test[_i][_qp] * ((_xB_beta[_qp]  - _xB_alpha[_qp])* _dhbeta_dphialpha[_qp] 
+                             +(_xB_gamma[_qp] - _xB_alpha[_qp])* _dhgamma_dphialpha[_qp]
+                             +(_xB_delta[_qp] - _xB_alpha[_qp])* _dhdelta_dphialpha[_qp]
+                             +(_xB_epsilon[_qp] - _xB_alpha[_qp])* _dhepsilon_dphialpha[_qp]) * _phi[_j][_qp]);
+  }
+  else if (jvar == _phase_beta_var)
+  {
+    return (_test[_i][_qp] * ((_xB_alpha[_qp] - _xB_beta[_qp])* _dhalpha_dphibeta[_qp] 
+                             +(_xB_gamma[_qp] - _xB_beta[_qp])* _dhgamma_dphibeta[_qp] 
+                             +(_xB_delta[_qp] - _xB_beta[_qp])* _dhdelta_dphibeta[_qp]
+                             +(_xB_epsilon[_qp] - _xB_beta[_qp])*_dhepsilon_dphibeta[_qp])* _phi[_j][_qp]);
+  }
+  else if (jvar == _phase_gamma_var)
+  {
+    return (_test[_i][_qp] *((_xB_alpha[_qp] - _xB_gamma[_qp])* _dhalpha_dphigamma[_qp] 
+                            +(_xB_beta[_qp]  - _xB_gamma[_qp])* _dhbeta_dphigamma[_qp]
+                            +(_xB_delta[_qp] - _xB_gamma[_qp])* _dhdelta_dphigamma[_qp]
+                            +(_xB_epsilon[_qp] - _xB_gamma[_qp])* _dhepsilon_dphigamma[_qp])* _phi[_j][_qp]);
+  }
+  else if (jvar == _phase_delta_var)
+  {
+    return (_test[_i][_qp] *((_xB_alpha[_qp] - _xB_delta[_qp])* _dhalpha_dphidelta[_qp] 
+                            +(_xB_beta[_qp]  - _xB_delta[_qp])* _dhbeta_dphidelta[_qp]
+                            +(_xB_gamma[_qp] - _xB_delta[_qp])* _dhgamma_dphidelta[_qp]
+                            +(_xB_epsilon[_qp] - _xB_delta[_qp])* _dhepsilon_dphidelta[_qp])* _phi[_j][_qp]);
+  }
+  else if (jvar == _phase_epsilon_var)
+  {
+    return (_test[_i][_qp] *((_xB_alpha[_qp] - _xB_delta[_qp])* _dhalpha_dphidelta[_qp] 
+                            +(_xB_beta[_qp]  - _xB_delta[_qp])* _dhbeta_dphidelta[_qp]
+                            +(_xB_gamma[_qp] - _xB_delta[_qp])* _dhgamma_dphidelta[_qp]
+                            +(_xB_epsilon[_qp] - _xB_delta[_qp])* _dhepsilon_dphidelta[_qp])* _phi[_j][_qp]);
+  }
+  else if (jvar == _xB_var)
+  {
+    return -(_test[_i][_qp] * _phi[_j][_qp]);
+  }
+  else if (jvar == _C_diff_pot_var)
+  {
+    return (_test[_i][_qp] * TCPhaseConstraintMuB::chi_BC() *_phi[_j][_qp]);
+  }
+  else
+    return 0.0;
+}

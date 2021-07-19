@@ -10,7 +10,7 @@ gibbsApp::validParams()
   InputParameters params = MooseApp::validParams();
 
   // Do not use legacy material output, i.e., output properties on INITIAL as well as TIMESTEP_END
-  params.set<bool>("use_legacy_material_output") = false;
+  //params.set<bool>("use_legacy_material_output") = false;
 
   return params;
 }
