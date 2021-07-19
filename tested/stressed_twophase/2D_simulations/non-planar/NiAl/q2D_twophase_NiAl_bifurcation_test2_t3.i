@@ -594,6 +594,7 @@
     displacements = 'u_x u_y'
     a_name = a
     eta    = eta
+    outputs = all
   [../]
 
   [./PartialRankOneHomogenization]
@@ -711,10 +712,10 @@
   # Strain Jump Tensor        #
   #############################
 
-  [strain_jump_00]
-    type = ElementAverageValue
-    variable = strain_jump_00
-  []
+  #[strain_jump_00]
+  #  type = ElementAverageValue
+  #  variable = strain_jump_00
+  #[]
 
   #[strain_jump_11]
   #  type = ElementAverageValue
